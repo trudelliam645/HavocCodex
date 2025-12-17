@@ -40,7 +40,10 @@ func NewTeamserver(DatabasePath string) *Teamserver {
 		return nil
 	} else {
 		return &Teamserver{
-			DB: d,
+			DB:         d,
+			UserCache:  make(map[string]*db.User),
+			Roles:      make(map[string]RoleDefinition),
+			Workspaces: make(map[string]int64),
 		}
 	}
 }
@@ -70,6 +73,11 @@ func (t *Teamserver) Start() {
 
 	if t.Flags.Server.Port == "" {
 		t.Flags.Server.Port = strconv.Itoa(t.Profile.ServerPort())
+	}
+
+	if err := t.bootstrapRBAC(); err != nil {
+		logger.Error("RBAC bootstrap failed: " + err.Error())
+		return
 	}
 
 	gin.SetMode(gin.ReleaseMode)
@@ -555,7 +563,7 @@ func (t *Teamserver) handleRequest(id string) {
 	}
 	if !t.ClientAuthenticate(pk) {
 		logger.Error("Client [User: " + pk.Body.Info["User"].(string) + "] failed to Authenticate! (" + colors.Red(client.GlobalIP) + ")")
-		err := t.SendEvent(id, events.Authenticated(false))
+		err := t.SendEvent(id, events.Authenticated(false, ""))
 		if err != nil {
 			logger.Error("client (" + colors.Red(id) + ") error while sending authenticate message: " + colors.Red(err))
 		}
@@ -570,14 +578,16 @@ func (t *Teamserver) handleRequest(id string) {
 
 		client.Authenticated = true
 		client.ClientID = id
+		client.SessionID = t.issueSession(pk.Body.Info["User"].(string))
 
-		err := t.SendEvent(id, events.Authenticated(true))
+		err := t.SendEvent(id, events.Authenticated(true, client.SessionID))
 		if err != nil {
 			logger.Error("client (" + colors.Red(id) + ") error while sending authenticate message:" + colors.Red(err))
 		}
 	}
 
 	client.Username = pk.Body.Info["User"].(string)
+	t.audit(client.Username, "login", client.GlobalIP, map[string]any{"session": client.SessionID})
 	packageNewUser := events.ChatLog.NewUserConnected(client.Username)
 	t.EventAppend(packageNewUser)
 	t.EventBroadcast(id, packageNewUser)
@@ -641,32 +651,25 @@ func (t *Teamserver) ClientAuthenticate(pk packager.Package) bool {
 				if t.Profile.Config.Operators != nil {
 					var (
 						UserPassword string
-						UserName     string
 						PassHash     = sha3.New256()
-						UserFound    = false
 					)
 
-					// search for operator
-					for _, User := range t.Profile.Config.Operators.Users {
-						if User.Name == pk.Head.User {
-							UserName = User.Name
-							UserFound = true
-
-							PassHash.Write([]byte(User.Password))
-							UserPassword = hex.EncodeToString(PassHash.Sum(nil))
-
-							logger.Debug("Found User: " + User.Name)
+					if user, err := t.ensureUser(pk.Head.User); err == nil {
+						UserPassword = user.PasswordHash
+					} else {
+						// fallback to profile config if cache is empty
+						for _, User := range t.Profile.Config.Operators.Users {
+							if User.Name == pk.Head.User {
+								PassHash.Write([]byte(User.Password))
+								UserPassword = hex.EncodeToString(PassHash.Sum(nil))
+								PassHash.Reset()
+							}
 						}
 					}
 
-					// check if the operator was even found
-					if UserFound {
-						if pk.Body.Info["Password"].(string) == UserPassword {
-							logger.Debug("User " + colors.Red(UserName) + " is authenticated")
-							return true
-						}
-					} else {
-						logger.Debug("User not found")
+					if UserPassword != "" && pk.Body.Info["Password"].(string) == UserPassword {
+						logger.Debug("User " + colors.Red(pk.Head.User) + " is authenticated")
+						return true
 					}
 
 					logger.Debug("User not authenticated")
@@ -685,6 +688,172 @@ func (t *Teamserver) ClientAuthenticate(pk packager.Package) bool {
 
 	logger.Error("Client failed to authenticate with password hash :: " + pk.Body.Info["Password"].(string))
 	return false
+}
+
+func (t *Teamserver) bootstrapRBAC() error {
+	if t.DB == nil {
+		return errors.New("database not initialized")
+	}
+
+	_ = t.DB.DeleteStaleSessions(time.Now())
+
+	workspaceID, err := t.DB.EnsureWorkspace("default")
+	if err != nil {
+		return err
+	}
+
+	t.Workspaces["default"] = workspaceID
+	t.DefaultWorkspaceID = workspaceID
+
+	defaultRoles := map[string][]string{
+		"admin":    {"listener:manage", "agent:task", "payload:generate", "workspace:switch", "audit:view"},
+		"operator": {"listener:manage", "agent:task", "payload:generate"},
+		"auditor":  {"audit:view"},
+	}
+
+	for role, perms := range defaultRoles {
+		if err := t.DB.UpsertRole(role, perms); err != nil {
+			return err
+		}
+	}
+
+	if err := t.loadRoles(); err != nil {
+		return err
+	}
+
+	if t.Profile != nil && t.Profile.Config.Operators != nil {
+		for _, User := range t.Profile.Config.Operators.Users {
+			passHash := sha3.New256()
+			passHash.Write([]byte(User.Password))
+			encoded := hex.EncodeToString(passHash.Sum(nil))
+			passHash.Reset()
+
+			if savedUser, err := t.DB.SaveUser(User.Name, encoded, ""); err == nil {
+				t.UserCache[User.Name] = savedUser
+				_ = t.DB.AssignRole(savedUser.ID, "admin", workspaceID)
+			}
+		}
+	}
+
+	return nil
+}
+
+func (t *Teamserver) loadRoles() error {
+	rows, err := t.DB.Db().Query(`SELECT Name, Permissions FROM TS_Roles`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			name  string
+			perms string
+		)
+
+		if err := rows.Scan(&name, &perms); err != nil {
+			return err
+		}
+
+		var permList []string
+		_ = json.Unmarshal([]byte(perms), &permList)
+
+		permMap := make(map[string]bool)
+		for _, p := range permList {
+			permMap[p] = true
+		}
+
+		t.Roles[name] = RoleDefinition{Name: name, Permissions: permMap}
+	}
+
+	return nil
+}
+
+func (t *Teamserver) ensureUser(username string) (*db.User, error) {
+	if user, ok := t.UserCache[username]; ok {
+		return user, nil
+	}
+
+	user, err := t.DB.GetUser(username)
+	if err != nil {
+		return nil, err
+	}
+
+	t.UserCache[username] = user
+	return user, nil
+}
+
+func (t *Teamserver) issueSession(username string) string {
+	user, err := t.ensureUser(username)
+	if err != nil {
+		return ""
+	}
+
+	workspaceID := t.DefaultWorkspaceID
+	sessionID := utils.GenerateID(24)
+	expires := time.Now().Add(24 * time.Hour)
+
+	if err := t.DB.SessionSave(sessionID, user.ID, workspaceID, expires); err != nil {
+		logger.DebugError("Failed to persist session: " + err.Error())
+		return ""
+	}
+
+	ctx := SessionContext{SessionID: sessionID, User: username, Workspace: "default", ExpiresAt: expires}
+	t.Sessions.Store(sessionID, ctx)
+
+	return sessionID
+}
+
+func (t *Teamserver) HasPermission(username, permission string) bool {
+	if username == "" {
+		return false
+	}
+
+	user, err := t.ensureUser(username)
+	if err != nil {
+		logger.DebugError("permission check failed: " + err.Error())
+		return false
+	}
+
+	roles, err := t.DB.UserRoles(user.ID, t.DefaultWorkspaceID)
+	if err != nil {
+		logger.DebugError("failed to load roles: " + err.Error())
+		return false
+	}
+
+	for _, role := range roles {
+		if def, ok := t.Roles[role]; ok {
+			if def.Permissions[permission] {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func (t *Teamserver) requirePermission(username, permission string) bool {
+	if t.HasPermission(username, permission) {
+		return true
+	}
+
+	msg := fmt.Sprintf("Permission denied: %s missing %s", username, permission)
+	pk := events.Teamserver.Logger(msg)
+	t.EventAppend(pk)
+	t.EventBroadcast("", pk)
+	t.audit(username, "permission_denied", permission, map[string]any{"permission": permission})
+	return false
+}
+
+func (t *Teamserver) audit(username, action, target string, metadata map[string]any) {
+	user, err := t.ensureUser(username)
+	if err == nil {
+		_ = t.DB.AddAuditEvent(user.ID, t.DefaultWorkspaceID, action, target, metadata)
+	}
+
+	pk := events.Audit.Log(username, action, target, metadata)
+	t.EventAppend(pk)
+	t.EventBroadcast("", pk)
 }
 
 func (t *Teamserver) EventBroadcast(ExceptClient string, pk packager.Package) {

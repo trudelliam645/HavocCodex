@@ -252,6 +252,14 @@ This part assumes you have a Teamserver running, with a Teamserver-client connec
 
 The Havoc Teamserver is written in Golang. It handles the listeners, teamserver authentication and payload generation. It also supports ExternalC2 functionality through the configuration of Service endpoints.
 
+### RBAC and audit logging
+
+The teamserver persists users, roles, and workspaces directly in SQLite. On startup, migrations seed a `default` workspace plus default roles (`admin`, `operator`, `auditor`) and create an `TS_AuditEvents` ledger.
+
+- Operators defined in your profile are written to `TS_Users` with hashed credentials and automatically granted the `admin` role for the default workspace. Update the profile passwords and restart the server to rotate credentials, or update `TS_Users`/`TS_UserRoles` directly for out-of-band rotation.
+- Session tokens are stored in `TS_Sessions`; deleting a row invalidates the token immediately for all HTTP/WebSocket handlers.
+- Audit entries record listener lifecycle changes, payload generation, and tasking metadata. Query `TS_AuditEvents` directly or view the feed inside the client’s **Activity & Approvals** tab.
+
 ### <a name="stt"></a> Starting the Teamserver
 
 Running `./teamserver server --profile ./profiles/havoc.yaotl -v --debug` will launch the built Teamserver with verbosity and debugging enabled.
@@ -701,4 +709,3 @@ Official Modules:
 Jobs are ran in their own threads, and sleep obfuscation requires that all threads are suspended in order to encrypt the heap, otherwise the process would crash. 
 
 ---
-

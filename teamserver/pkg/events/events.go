@@ -19,7 +19,7 @@ type (
 	teamserver int
 )
 
-func Authenticated(authed bool) packager.Package {
+func Authenticated(authed bool, sessionID string) packager.Package {
 
 	if authed {
 		return packager.Package{
@@ -32,6 +32,7 @@ func Authenticated(authed bool) packager.Package {
 				SubEvent: packager.Type.InitConnection.Success,
 				Info: map[string]any{
 					"Message": "Successful Authenticated",
+					"Session": sessionID,
 				},
 			},
 		}
