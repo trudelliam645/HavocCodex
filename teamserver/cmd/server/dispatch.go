@@ -44,6 +44,9 @@ func (t *Teamserver) DispatchEvent(pk packager.Package) {
 			break
 
 		case packager.Type.Session.Input:
+			if !t.requirePermission(pk.Head.User, "agent:task") {
+				return
+			}
 			var (
 				job       *agent.Job
 				command   = 0
@@ -59,6 +62,8 @@ func (t *Teamserver) DispatchEvent(pk packager.Package) {
 				logger.Debug("AgentID [" + agentID + "] not found")
 				return
 			}
+
+			t.audit(pk.Head.User, "task", DemonID, map[string]any{"command": pk.Body.Info["CommandID"]})
 
 			for i := range t.Agents.Agents {
 
@@ -346,6 +351,9 @@ func (t *Teamserver) DispatchEvent(pk packager.Package) {
 		}
 
 	case packager.Type.Listener.Type:
+		if !t.requirePermission(pk.Head.User, "listener:manage") {
+			return
+		}
 		switch pk.Body.SubEvent {
 
 		case packager.Type.Listener.Add:
@@ -512,6 +520,8 @@ func (t *Teamserver) DispatchEvent(pk packager.Package) {
 					})
 				}
 
+				t.audit(pk.Head.User, "listener.add", Config.Name, map[string]any{"protocol": Protocol})
+
 				break
 
 			case handlers.AGENT_PIVOT_SMB:
@@ -544,6 +554,8 @@ func (t *Teamserver) DispatchEvent(pk packager.Package) {
 						return true
 					})
 				}
+
+				t.audit(pk.Head.User, "listener.add", SmdConfig.Name, map[string]any{"protocol": Protocol})
 
 				break
 
@@ -578,6 +590,8 @@ func (t *Teamserver) DispatchEvent(pk packager.Package) {
 						return true
 					})
 				}
+
+				t.audit(pk.Head.User, "listener.add", ExtConfig.Name, map[string]any{"protocol": Protocol})
 
 				break
 
@@ -615,6 +629,8 @@ func (t *Teamserver) DispatchEvent(pk packager.Package) {
 								},
 							})
 
+							t.audit(pk.Head.User, "listener.add", ListenerName, map[string]any{"protocol": Protocol})
+
 							// break from this switch
 							return
 						}
@@ -640,6 +656,7 @@ func (t *Teamserver) DispatchEvent(pk packager.Package) {
 
 				t.EventAppend(p)
 				t.EventBroadcast("", p)
+				t.audit(pk.Head.User, "listener.remove", val.(string), nil)
 			}
 
 			break
@@ -796,6 +813,7 @@ func (t *Teamserver) DispatchEvent(pk packager.Package) {
 
 				t.EventAppend(p)
 				t.EventBroadcast("", p)
+				t.audit(pk.Head.User, "listener.edit", Config.Name, map[string]any{"protocol": Protocol})
 
 				break
 
@@ -805,6 +823,10 @@ func (t *Teamserver) DispatchEvent(pk packager.Package) {
 		}
 
 	case packager.Type.Gate.Type:
+
+		if !t.requirePermission(pk.Head.User, "payload:generate") {
+			return
+		}
 
 		switch pk.Body.SubEvent {
 		case packager.Type.Gate.Stageless:
@@ -817,6 +839,8 @@ func (t *Teamserver) DispatchEvent(pk packager.Package) {
 				SendConsoleMsg func(MsgType, Message string)
 				ClientID       string
 			)
+
+			t.audit(pk.Head.User, "payload.generate", ListenerName, map[string]any{"agent": AgentType, "arch": Arch, "format": Format})
 
 			t.Clients.Range(func(key, value any) bool {
 				Client := value.(*Client)

@@ -115,6 +115,11 @@ type (
 			Log     int
 			Profile int
 		}
+
+		Audit struct {
+			Type   int
+			Append int
+		}
 	}
 )
 
@@ -255,4 +260,9 @@ var Type = Types{
 		Log     int
 		Profile int
 	}{Type: 0x10, Log: 0x1, Profile: 0x2},
+
+	Audit: struct {
+		Type   int
+		Append int
+	}{Type: 0x11, Append: 0x1},
 }

@@ -7,6 +7,7 @@ import (
 	"Havoc/pkg/profile"
 	"Havoc/pkg/service"
 	"Havoc/pkg/webhook"
+	"time"
 	"sync"
 
 	"github.com/gin-gonic/gin"
@@ -36,6 +37,18 @@ type Users struct {
 	Password string
 	Hashed   bool
 	Online   bool
+}
+
+type RoleDefinition struct {
+	Name        string
+	Permissions map[string]bool
+}
+
+type SessionContext struct {
+	SessionID string
+	User      string
+	Workspace string
+	ExpiresAt time.Time
 }
 
 type serverFlags struct {
@@ -75,10 +88,17 @@ type Teamserver struct {
 	Profile    *profile.Profile
 	Clients    sync.Map // map[string]*Client
 	Users      []Users
+	UserCache  map[string]*db.User
 	EventsList []packager.Package
 	Service    *service.Service
 	WebHooks   *webhook.WebHook
 	DB         *db.DB
+	Sessions   sync.Map // map[string]SessionContext
+
+	Workspaces map[string]int64
+	Roles      map[string]RoleDefinition
+
+	DefaultWorkspaceID int64
 
 	Server struct {
 		Path   string

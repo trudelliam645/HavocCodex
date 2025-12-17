@@ -11,6 +11,7 @@ type DB struct {
 	existed bool
 	db      *sql.DB
 	path    string
+	version int
 }
 
 func DatabaseNew(dbpath string) (*DB, error) {
@@ -35,11 +36,14 @@ func DatabaseNew(dbpath string) (*DB, error) {
 	if !db.existed {
 
 		/* create db tables */
-		err = db.init()
-		if err != nil {
+		if err = db.init(); err != nil {
 			return nil, err
 		}
 
+	}
+
+	if err = db.applyMigrations(); err != nil {
+		return nil, err
 	}
 
 	return db, nil
@@ -48,17 +52,17 @@ func DatabaseNew(dbpath string) (*DB, error) {
 func (db *DB) init() error {
 	var err error
 
-	_, err = db.db.Exec(`CREATE TABLE "TS_Listeners" ("Name" text UNIQUE, "Protocol" text, "Config" text);`)
+	_, err = db.db.Exec(`CREATE TABLE IF NOT EXISTS "TS_Listeners" ("Name" text UNIQUE, "Protocol" text, "Config" text);`)
 	if err != nil {
 		return err
 	}
 
-	_, err = db.db.Exec(`CREATE TABLE "TS_Agents" ("AgentID" int, "Active" int, "Reason" string, "AESKey" string, "AESIv" string, "Hostname" string, "Username" string, "DomainName" string, "ExternalIP" string, "InternalIP" string, "ProcessName" string, BaseAddress int, "ProcessPID" int, "ProcessTID" int, "ProcessPPID" int, "ProcessArch" string, "Elevated" string, "OSVersion" string, "OSArch" string, "SleepDelay" int, "SleepJitter" int, "KillDate" int, "WorkingHours" int, "FirstCallIn" string, "LastCallIn" string);`)
+	_, err = db.db.Exec(`CREATE TABLE IF NOT EXISTS "TS_Agents" ("AgentID" int, "Active" int, "Reason" string, "AESKey" string, "AESIv" string, "Hostname" string, "Username" string, "DomainName" string, "ExternalIP" string, "InternalIP" string, "ProcessName" string, BaseAddress int, "ProcessPID" int, "ProcessTID" int, "ProcessPPID" int, "ProcessArch" string, "Elevated" string, "OSVersion" string, "OSArch" string, "SleepDelay" int, "SleepJitter" int, "KillDate" int, "WorkingHours" int, "FirstCallIn" string, "LastCallIn" string);`)
 	if err != nil {
 		return err
 	}
 
-	_, err = db.db.Exec(`CREATE TABLE "TS_Links" ("ParentAgentID" int, "LinkAgentID" int);`)
+	_, err = db.db.Exec(`CREATE TABLE IF NOT EXISTS "TS_Links" ("ParentAgentID" int, "LinkAgentID" int);`)
 	if err != nil {
 		return err
 	}
@@ -72,4 +76,8 @@ func (db *DB) Existed() bool {
 
 func (db *DB) Path() string {
 	return db.path
+}
+
+func (db *DB) Db() *sql.DB {
+	return db.db
 }

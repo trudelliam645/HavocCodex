@@ -22,6 +22,8 @@
 #include <QToolButton>
 #include <QShortcut>
 #include <QTimer>
+#include <QVBoxLayout>
+#include <QLabel>
 
 using namespace HavocNamespace::HavocSpace;
 
@@ -101,23 +103,42 @@ void HavocNamespace::UserInterface::HavocUi::setupUi(QMainWindow *Havoc)
     gridLayout_3->setObjectName( QString::fromUtf8( "gridLayout_3" ) );
     gridLayout_3->setContentsMargins( 0, 0, 0, 0 );
 
-    TeamserverTabWidget = new QTabWidget( centralwidget );
-    TeamserverTabWidget->setObjectName( QString::fromUtf8( "TeamserverTabWidget" ) );
-    TeamserverTabWidget->setStyleSheet( FileRead( ":/stylesheets/teamserverTab" ) );
-    TeamserverTabWidget->setTabBarAutoHide( true );
-    TeamserverTabWidget->setTabsClosable( true );
+	TeamserverTabWidget = new QTabWidget( centralwidget );
+	TeamserverTabWidget->setObjectName( QString::fromUtf8( "TeamserverTabWidget" ) );
+	TeamserverTabWidget->setStyleSheet( FileRead( ":/stylesheets/teamserverTab" ) );
+	TeamserverTabWidget->setTabBarAutoHide( true );
+	TeamserverTabWidget->setTabsClosable( true );
 
     /* TODO: refactor this. */
     HavocX::Teamserver.TabSession = new UserInterface::Widgets::TeamserverTabSession;
     HavocX::Teamserver.TabSession->setupUi( new QWidget, HavocX::Teamserver.Name );
-    TeamserverTabWidget->setCurrentIndex(
-        TeamserverTabWidget->addTab(
-            HavocX::Teamserver.TabSession->PageWidget,
-            HavocX::Teamserver.Name
-        )
-    );
+	TeamserverTabWidget->setCurrentIndex(
+		TeamserverTabWidget->addTab(
+			HavocX::Teamserver.TabSession->PageWidget,
+			HavocX::Teamserver.Name
+		)
+	);
 
-    gridLayout_3->addWidget( TeamserverTabWidget, 0, 0, 1, 1 );
+	// Activity & Approvals view for RBAC visibility and audit feed
+	auto ActivityWidget = new QWidget( TeamserverTabWidget );
+	ActivityWidget->setObjectName( QString::fromUtf8( "ActivityApprovals" ) );
+
+	auto ActivityLayout = new QVBoxLayout( ActivityWidget );
+	ActivityLayout->setContentsMargins( 8, 8, 8, 8 );
+
+	auto ActivityHeader = new QLabel( "Activity & Approvals", ActivityWidget );
+	ActivityHeader->setStyleSheet( "font-weight: bold;" );
+
+	auto ActivityHint = new QLabel( "Live audit entries and pending approvals will appear here once the session is authenticated and authorized.", ActivityWidget );
+	ActivityHint->setWordWrap( true );
+
+	ActivityLayout->addWidget( ActivityHeader );
+	ActivityLayout->addWidget( ActivityHint );
+	ActivityLayout->addStretch();
+
+	TeamserverTabWidget->addTab( ActivityWidget, "Activity & Approvals" );
+
+	gridLayout_3->addWidget( TeamserverTabWidget, 0, 0, 1, 1 );
 
     menubar = new QMenuBar( this->HavocWindow );
     menubar->setObjectName( QString::fromUtf8( "menubar" ) );
@@ -613,4 +634,3 @@ void UserInterface::HavocUi::PythonPrepare()
         Widgets::ScriptManager::AddScript( ScriptPath );
     }
 }
-

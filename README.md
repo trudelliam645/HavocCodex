@@ -70,6 +70,17 @@ See the [Installation](https://havocframework.com/docs/installation) docs for in
 
 ### Community
 
+### RBAC, sessions, and audit logging
+
+The teamserver now ships with role-based access control (RBAC) primitives and a built-in audit log.
+
+- SQLite migrations seed a `default` workspace and default roles (`admin`, `operator`, `auditor`) with permissions for listener management, payload generation, and tasking. Existing databases are migrated automatically on startup; new deployments just start the server to create the schema.
+- Operators defined in your profile are materialized into the `TS_Users` table with hashed credentials during bootstrap. Update the profile passwords and restart the teamserver to rotate credentials or insert fresh rows into `TS_Users`/`TS_UserRoles` for out-of-band rotation.
+- Session tokens are generated after authentication and streamed to clients; they can be revoked by deleting rows from `TS_Sessions` or rotating the operator password.
+- Audit events are persisted to `TS_AuditEvents` and broadcast to clients (see the **Activity & Approvals** tab in the Qt client). Each entry captures who performed an action, the target, and contextual metadata to support review/approvals.
+
+---
+
 You can join the official [Havoc Discord](https://discord.gg/z3PF3NRDE5) to chat with the community! 
 
 ### Note
